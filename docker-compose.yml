@@ -28,6 +28,7 @@ services:
         container_name: node-fullcycle
         volumes:
             - ./node:/app
+            - /app/node_modules
         expose:
             - "3000"
         environment:
