@@ -1,4 +1,3 @@
-
 const express = require('express');
 const mysql = require('mysql2/promise');
 
@@ -18,6 +17,17 @@ const pool = mysql.createPool({
     queueLimit: 0
 });
 
+const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
+
+const retryableErrors = new Set([
+    'ECONNREFUSED',
+    'ECONNRESET',
+    'ETIMEDOUT',
+    'EAI_AGAIN',
+    'ENOTFOUND',
+    'PROTOCOL_CONNECTION_LOST'
+]);
+
 app.get('/', async (req, res) => {
     try {
         const randomName = `Person ${Math.floor(Math.random() * 1000)}`;
@@ -27,11 +37,11 @@ app.get('/', async (req, res) => {
             [randomName]
         );
 
-        const [peoples] = await pool.query(
+        const [people] = await pool.query(
             'SELECT id, name FROM people'
         );
 
-        const response = peoples
+        const response = people
             .map(person => `<li>${person.id}: ${person.name}</li>`)
             .join('');
 
@@ -42,27 +52,56 @@ app.get('/', async (req, res) => {
     }
 });
 
-async function bootstrap() {
-    try {
-        console.log(`Connecting to database at ${process.env.DB_HOST}:${process.env.DB_PORT}...`);
+async function prepareDatabase() {
+    const retryDelay = 3000;
 
-        await pool.query(`
-            CREATE TABLE IF NOT EXISTS people (
-                id INT AUTO_INCREMENT PRIMARY KEY,
-                name VARCHAR(255) NOT NULL
-            )
-        `);
+    for (let attempt = 1; ; attempt++) {
+        try {
+            console.log(
+                `Connecting to database at ${process.env.DB_HOST}:` +
+                `${process.env.DB_PORT || 3306} ` +
+                `(attempt ${attempt})...`
+            );
 
-        console.log('Table "people" is ready.');
+            await pool.query(`
+                CREATE TABLE IF NOT EXISTS people (
+                    id INT AUTO_INCREMENT PRIMARY KEY,
+                    name VARCHAR(255) NOT NULL
+                )
+            `);
 
-        app.listen(port, () => {
-            console.log(`App listening on port ${port}`);
-        });
+            console.log('Table "people" is ready.');
+            return;
+        } catch (error) {
+            if (!retryableErrors.has(error.code)) {
+                throw error;
+            }
 
-    } catch (error) {
-        console.error('Application startup failed:', error);
-        process.exit(1);
+            console.warn(
+                `Database unavailable (${error.code}). Retrying in 3 seconds...`
+            );
+
+            await sleep(retryDelay);
+        }
     }
 }
 
-bootstrap();
+async function bootstrap() {
+    await prepareDatabase();
+
+    app.listen(port, '0.0.0.0', () => {
+        console.log(`App listening on port ${port}`);
+    });
+}
+
+bootstrap().catch(async error => {
+    console.error('Application startup failed:', error);
+
+    try {
+        await pool.end();
+    } catch (closeError) {
+        console.error('Failed to close database pool:', closeError);
+    } finally {
+        process.exitCode = 1;
+    }
+});

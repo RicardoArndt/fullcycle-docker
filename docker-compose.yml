@@ -1,4 +1,4 @@
-services: 
+services:
     db:
         image: mysql:8
         container_name: db
@@ -9,10 +9,23 @@ services:
         environment:
             - MYSQL_DATABASE=fullcycle
             - MYSQL_ROOT_PASSWORD=root
-        expose: 
+        expose:
             - "3306"
         healthcheck:
-            test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-u", "root", "-proot"]
+            test:
+                [
+                    "CMD",
+                    "mysqladmin",
+                    "ping",
+                    "--protocol=TCP",
+                    "-h",
+                    "127.0.0.1",
+                    "-P",
+                    "3306",
+                    "-u",
+                    "root",
+                    "-proot"
+                ]
             interval: 5s
             timeout: 10s
             retries: 5
@@ -21,7 +34,7 @@ services:
             - fullcycle
 
     node:
-        build: 
+        build:
             context: ./node
             target: builder
         working_dir: /app
